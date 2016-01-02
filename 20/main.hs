@@ -37,11 +37,22 @@ firstNumber = go 1 where
      divs = devisors i
      s = sum divs
 
+firstNumber2 = go 1 where
+  go i
+    | 11*s >= 10*magicNumber = i
+    | otherwise = go (i+1)
+   where
+     divs = devisors i
+     s = sum $ filter (\d -> d*50 >= i) $ S.toList divs
+
+
 main = do
   putStrLn "Day 20: Presents"
 
   print $ devisors 11
 
-  putStr "Part 1: "
-  print $ firstNumber
+  -- putStr "Part 1: "
+  -- print $ firstNumber
 
+  putStr "Part 2: "
+  print $ firstNumber2
