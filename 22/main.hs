@@ -4,6 +4,8 @@ import Debug.Trace
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
+import Data.List (partition)
+
 import Control.Applicative
 
 data SpellT = MMissile
@@ -63,23 +65,27 @@ data GameState = GameState { player :: Player
 
 applyTurn :: GameState -> GameState
 applyTurn = playerTurn where
-  bossTurn (GameState p@(Player ph m ss) b@(Boss _ bd) sp)
-    = GameState p' b sp
+  bossTurn g@(GameState p@(Player ph m ss) b@(Boss bh bd) _)
+    = g { player = p', boss = b' }
       where
         p' = p { phealth = max 0 (ph-att)
                , spells = tickSpells ss
                , mana = m + rec }
+        b' = b { bhealth = max 0 (bh - dm) }
         att = max 1 (bd-sh)
-        sh = sum $ shield <$> ss
+        dm  = sum $ damage <$> ss
+        sh  = sum $ shield <$> ss
         rec = sum $ recharge <$> ss
 
 
-  playerTurn (GameState p@(Player ph m ss) (Boss bh bd) sp)
-    | bh <= dm  = GameState p' (Boss 0 bd) sp
-    | otherwise = bossTurn $ GameState p' (Boss (bh-dm) bd) sp
+  playerTurn g@(GameState p@(Player ph m ss) b@(Boss bh bd) _)
+    = if bhealth b' > 0 then bossTurn g'
+      else g'
 
      where
+       g' = g { player = p', boss = b' }
        p' = p { spells = tickSpells ss, mana = m + rec, phealth = ph + h }
+       b' = b { bhealth = max 0 (bh-dm) }
        rec = sum $ recharge <$> ss
        h   = sum $ heal <$> ss
        dm  = sum $ damage <$> ss
@@ -91,24 +97,26 @@ applyTurn = playerTurn where
 
 
 -- runs two turns: one for the player and once for the boss
-minMana :: GameState -> Maybe Int
-minMana g@(GameState p@(Player _ m ss) boss sp) = mincost where
+minMana ::Int -> GameState -> Maybe Int
+minMana turn g@(GameState p@(Player _ m ss) boss sp) = mincost where
 
-  mincost = case costs of
-              [] -> Nothing
-              cs -> Just $ minimum cs
+  mincost = if not (null success) then trace (show turn) Just lowestCost
+            else if null incomplete then Nothing
+            else recurse
 
-  costs = trace ("Spent: " ++ show sp) $ concat $ recurse <$> nextStates
+  lowestCost = minimum $ spent <$> success
 
-  recurse (GameState _ (Boss 0 _) spent) = [spent] -- defeated the boss
-  recurse g = case minMana g of
-                   Just i -> [i]
-                   Nothing -> []
+  recurse = foldl f Nothing (minMana (turn+1) <$> incomplete) where
+    f Nothing v = v
+    f a Nothing = a
+    f (Just a) (Just b) = Just (min a b)
+
+  (success,incomplete) = partition (\(GameState _ (Boss hp _) spent) -> hp == 0) nextStates
 
   -- valid next states
   nextStates = filter ((>0). phealth . player) $ applyTurn <$> (addSpell <$> availableSpells)
-  addSpell s = g { player = p { mana = (mana p)-(cost s), spells = s:spells p }, spent = sp+ (cost s) }
-  availableSpells = filter ((<=m) . cost) $
+  addSpell s = g { player = p { mana = (mana p)-(cost s), spells = s:ss }, spent = sp+ (cost s) }
+  availableSpells = filter (\s -> cost s <= m) $
                     fmap (newSpells M.!) $
                     S.toList $
                     S.difference allSpells (S.fromList (spell <$> ss))
@@ -117,5 +125,5 @@ initial = GameState (Player 50 500 []) (Boss 58 9) 0
 
 main = do
   putStrLn "Day 22: Wizards and Monsters"
-  print $ minMana initial
+  print $ minMana 0 initial
 
