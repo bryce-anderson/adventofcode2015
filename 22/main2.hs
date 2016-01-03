@@ -70,7 +70,8 @@ data GameState = GameState { player :: Player
       deriving (Show)
 
 applyTurn :: GameState -> GameState
-applyTurn = playerTurn where
+applyTurn g@(GameState p@(Player 1 _ _) _ _) = g { player = p { phealth = 0 } }
+applyTurn g = playerTurn g where
   bossTurn g@(GameState p@(Player ph m ss) b@(Boss bh bd) _)
     = g { player = p', boss = b' }
       where
@@ -90,7 +91,7 @@ applyTurn = playerTurn where
 
      where
        g' = g { player = p', boss = b' }
-       p' = p { spells = tickSpells ss, mana = m + rec, phealth = ph + h }
+       p' = p { spells = tickSpells ss, mana = m + rec, phealth = ph + h - 1 }
        b' = b { bhealth = max 0 (bh-dm) }
        rec = sum $ recharge <$> ss
        h   = sum $ heal <$> ss
