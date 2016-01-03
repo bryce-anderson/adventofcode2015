@@ -2,3 +2,5 @@
 **.o
 **.out
 main
+**.dyn_o
+**.dyn_hi

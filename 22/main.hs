@@ -1,10 +1,16 @@
+{-# LANGUAGE TemplateHaskell #-}
 import Debug.Trace
 
+import Control.Monad (forM_)
+import Control.Monad.State.Strict
+import Control.Lens
 
 import qualified Data.Set as S
+import qualified Data.Sequence as Sq
 import qualified Data.Map.Strict as M
 
 import Data.List (partition)
+import Data.Monoid
 
 import Control.Applicative
 
@@ -23,7 +29,7 @@ allSpells = S.fromList [ MMissile
 
               --      name   cost dur heal rec dm sh
 spellMM       = Spell MMissile 53  1  0    0   4   0
-spellDrain    = Spell Drain    73  1  2    2   0   0
+spellDrain    = Spell Drain    73  1  2    0   2   0
 spellShield   = Spell Shield   113 6  0    0   0   7
 spellPoison   = Spell Poison   173 6  0    0   3   0
 spellRecharge = Spell Recharge 229 5  0    101 0   0
@@ -95,26 +101,48 @@ applyTurn = playerTurn where
   tickSpells (s:ss) | duration s <= 1 = tickSpells ss
                     | otherwise = s { duration = (duration s - 1) } : tickSpells ss
 
+data TheState = TheState { _minCost :: Int
+                         , _queue   :: Sq.Seq GameState }
+makeLenses ''TheState
 
 -- runs two turns: one for the player and once for the boss
-minMana ::Int -> GameState -> Maybe Int
-minMana turn g@(GameState p@(Player _ m ss) boss sp) = mincost where
+minMana ::GameState -> Int
+minMana g = evalState loop (TheState maxBound (Sq.singleton g)) where
+  loop = do
+    oldMin <- use minCost
+    q <- use queue
+    if Sq.null q then use minCost
+    else do
+      let g = Sq.index q 0
+      queue .= Sq.drop 1 q
+      -- traceM $ "Sent: " ++ show (spent g)
+      case step1 g of
+        Left v -> do
+          traceM $ "Found minimum: " ++ show v
+          if v < oldMin then do
+            minCost .= v
+            queue %= Sq.filter ((< v) . spent)
+          else return ()
 
-  mincost = if not (null success) then trace (show turn) Just lowestCost
-            else if null incomplete then Nothing
-            else recurse
+        Right states -> do
+          -- traceM $ "Adding states: " ++ show (length states)
+          let lower = filter ((< oldMin) . spent) states
+          queue %= (<> (Sq.fromList lower))
+
+      loop
+
+step1 :: GameState -> Either Int [GameState]
+step1 g@(GameState p@(Player _ m ss) boss sp) = mincost where
+
+  mincost = if not (null success) then Left lowestCost
+            else Right incomplete
 
   lowestCost = minimum $ spent <$> success
-
-  recurse = foldl f Nothing (minMana (turn+1) <$> incomplete) where
-    f Nothing v = v
-    f a Nothing = a
-    f (Just a) (Just b) = Just (min a b)
 
   (success,incomplete) = partition (\(GameState _ (Boss hp _) spent) -> hp == 0) nextStates
 
   -- valid next states
-  nextStates = filter ((>0). phealth . player) $ applyTurn <$> (addSpell <$> availableSpells)
+  nextStates = filter ((>0). phealth . player) $ (applyTurn . addSpell) <$> availableSpells
   addSpell s = g { player = p { mana = (mana p)-(cost s), spells = s:ss }, spent = sp+ (cost s) }
   availableSpells = filter (\s -> cost s <= m) $
                     fmap (newSpells M.!) $
@@ -125,5 +153,7 @@ initial = GameState (Player 50 500 []) (Boss 58 9) 0
 
 main = do
   putStrLn "Day 22: Wizards and Monsters"
-  print $ minMana 0 initial
+
+  putStr "Minimum mana: "
+  print $ minMana initial
 
